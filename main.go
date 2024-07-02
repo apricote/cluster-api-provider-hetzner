@@ -31,11 +31,11 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util/flags"
 	"sigs.k8s.io/cluster-api/util/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	// +kubebuilder:scaffold:imports
@@ -63,7 +63,6 @@ func init() {
 }
 
 var (
-	metricsAddr                        string
 	enableLeaderElection               bool
 	leaderElectionNamespace            string
 	probeAddr                          string
@@ -76,11 +75,15 @@ var (
 	logLevel                           string
 	syncPeriod                         time.Duration
 	rateLimitWaitTime                  time.Duration
+	diagnosticsOptions                 flags.DiagnosticsOptions
 )
+
+// Add RBAC for the authorized diagnostics endpoint.
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 func main() {
 	fs := pflag.CommandLine
-	fs.StringVar(&metricsAddr, "metrics-bind-address", "localhost:8080", "The address the metric endpoint binds to.")
 	fs.StringVar(&probeAddr, "health-probe-bind-address", ":9440", "The address the probe endpoint binds to.")
 	fs.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	fs.StringVar(&leaderElectionNamespace, "leader-elect-namespace", "", "Namespace that the controller performs leader election in. If unspecified, the controller will discover which namespace it is running in.")
@@ -95,10 +98,14 @@ func main() {
 	fs.DurationVar(&rateLimitWaitTime, "rate-limit", 5*time.Minute, "The rate limiting for HCloud controller (e.g. 5m)")
 	fs.BoolVar(&hcloudclient.DebugAPICalls, "debug-hcloud-api-calls", false, "Debug all calls to the hcloud API.")
 
+	flags.AddDiagnosticsOptions(fs, &diagnosticsOptions)
+
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
 	ctrl.SetLogger(utils.GetDefaultLogger(logLevel))
+
+	diagnosticsOpts := flags.GetDiagnosticsOptions(diagnosticsOptions)
 
 	var watchNamespaces map[string]cache.Config
 	if watchNamespace != "" {
@@ -109,7 +116,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		Metrics:                diagnosticsOpts,
 		HealthProbeBindAddress: probeAddr,
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Port: 9443,

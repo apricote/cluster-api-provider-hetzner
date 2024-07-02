@@ -29,11 +29,16 @@ spec:
             - /manager
           args:
             - "--leader-elect=true"
+            - "--diagnostics-address=${CAPH_DIAGNOSTICS_ADDRESS:=:8443}"
+            - "--insecure-diagnostics=${CAPH_INSECURE_DIAGNOSTICS:=false}"
           image: controller:latest
           name: manager
           ports:
             - containerPort: 9440
               name: healthz
+              protocol: TCP
+            - containerPort: 8443
+              name: metrics
               protocol: TCP
           livenessProbe:
             httpGet:
